@@ -1,0 +1,19 @@
+[package]
+name = "skiplist-rs"
+version = "0.1.0"
+authors = ["541196671@qq.com"]
+edition = "2018"
+keywords = ["collection", "skiplist", "sorted"]
+
+
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+license = "MIT"
+description = "Skip list is a kind of ordered map and can store any value inside. See skip list wikipedia page to learn more about this data structure."
+documentation = "https://docs.rs/skiplist-rs"
+readme = "README.md"
+
+
+[dependencies]
+rand = "0.7.3"
