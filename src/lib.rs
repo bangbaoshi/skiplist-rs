@@ -60,8 +60,8 @@ impl<K, V> Skiplist<K, V>
         let key_ptr = SortedLinkList::<K, V>::new_value(key);
         let len = self.lists.len();
         let mut front_node: Option<*mut LinkListNode<K, V>> = None;
-        let mut box_value: Option<Box<V>> = None;
-        box_value = Some(Box::new(value));
+        let mut box_value =  Some(Box::new(value));;
+
         for i in 0..len {
             let idx = i;
             let list = &mut self.lists[idx];
@@ -262,7 +262,6 @@ impl<K, V> SortedLinkList<K, V>
             unsafe {
                 let t_key = (*t).key;
                 if *t_key == *key {
-                    last_ptr = ptr;
                     return (ptr, step);
                 }
                 if desc_direction & &(*t_key < *key) {
