@@ -330,7 +330,6 @@ impl<K, V> SortedLinkList<K, V>
             }
             return node;
         }
-        None
     }
 
     fn remove_node(&mut self, node: Option<*mut LinkListNode<K, V>>) {
@@ -441,7 +440,6 @@ mod test {
     #[test]
     fn test_skiplist() {
         let mut list = Skiplist::new(10, true);
-
         for i in 0..500 {
             list.set(i, Order::new(i, format!("order {}", i)));
         }
@@ -449,16 +447,12 @@ mod test {
         if let Some(t) = list.find(15) {
             println!("old {}", t.as_ref().name);
         }
-
         list.set(15, Order::new(666, format!("new order 666")));
-
         if let Some(t) = list.find(15) {
             println!("old {}", t.as_ref().name);
         }
-
-
         println!("\r\n\r\ndelete 25");
-        list.remove(25);
+        list.remove(15);
         list.to_string();
     }
 
