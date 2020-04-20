@@ -13,19 +13,21 @@ use core::fmt;
 
 pub struct Skiplist<K, V> where K: PartialOrd + Display, V: Display {
     lists: Vec<SortedLinkList<K, V>>,
+    debug: bool,
 }
 
 impl<K, V> Skiplist<K, V>
     where K: PartialOrd + Display,
           V: Display {
-    pub fn new(level: usize) -> Skiplist<K, V> {
+    pub fn new(max_level: usize, debug: bool) -> Skiplist<K, V> {
         let mut lists = vec![];
-        for _ in 0..level {
+        for _ in 0..max_level {
             let list = SortedLinkList::new();
             lists.push(list);
         }
         Skiplist {
             lists,
+            debug,
         }
     }
 
@@ -55,24 +57,26 @@ impl<K, V> Skiplist<K, V>
 
         path.reverse();
         let mut rng = rand::thread_rng();
-        let (key_ptr, value_ptr) = SortedLinkList::new_value(key, value);
+        let key_ptr = SortedLinkList::<K, V>::new_value(key);
         let len = self.lists.len();
         let mut front_node: Option<*mut LinkListNode<K, V>> = None;
+        let mut box_value: Option<Box<V>> = None;
+        box_value = Some(Box::new(value));
         for i in 0..len {
             let idx = i;
             let list = &mut self.lists[idx];
             start = path[idx];
-            let mut ptr = SortedLinkList::create_node(key_ptr, value_ptr);
-            let mut node = list.insert(ptr, start);
-            if let Some(mut t) = front_node {
+            let node = list.insert(key_ptr, box_value, start);
+            box_value = None;
+            if let Some(t) = front_node {
                 unsafe {
                     (*t).skiplist_front = node;
                     (*node.unwrap()).skiplist_next = front_node;
                 }
             }
-            let value = rng.gen_range(0, 100);
+            let uplevel = rng.gen_range(0, 100);
 
-            if value % 2 > 0 {
+            if uplevel % 2 > 0 {
                 break;
             }
             front_node = node;
@@ -80,7 +84,7 @@ impl<K, V> Skiplist<K, V>
     }
 
 
-    pub fn find(&mut self, key: K) -> Option<*mut LinkListNode<K, V>> {
+    pub fn find(&mut self, key: K) -> Option<&Box<V>> {
         let len = self.lists.len() - 1;
         let mut start: Option<*mut LinkListNode<K, V>> = None;
         let mut desc_direction = true;
@@ -98,19 +102,29 @@ impl<K, V> Skiplist<K, V>
                     let res_key = (*t).key;
                     if *res_key == key {
                         result = res;
-                        break;
+                        start = (*t).skiplist_next;
+                    } else {
+                        desc_direction = *res_key > key;
+                        start = (*t).skiplist_next;
                     }
-                    desc_direction = *res_key > key;
-                    start = (*t).skiplist_next;
                 }
             }
         }
-        println!("step cost {}", step);
-        result
+        if self.debug {
+            println!("step cost {}", step);
+        }
+        if let Some(t) = result {
+            unsafe {
+                if let Some(t) = &(*t).value {
+                    return Some(t);
+                }
+            }
+        }
+        None
     }
 
 
-    pub fn remove(&mut self, key: K) -> Option<Box<LinkListNode<K, V>>> {
+    pub fn remove(&mut self, key: K) {
         let len = self.lists.len() - 1;
         let mut start: Option<*mut LinkListNode<K, V>> = None;
         let mut desc_direction = true;
@@ -141,11 +155,12 @@ impl<K, V> Skiplist<K, V>
                 (*t).front = None;
                 (*t).skiplist_front = None;
                 (*t).skiplist_next = None;
-                return Some(Box::from_raw(t));
+                Box::from_raw(t);
             }
         }
-        println!("step cost {}", step);
-        None
+        if self.debug {
+            println!("step cost {}", step);
+        }
     }
 
 
@@ -153,7 +168,9 @@ impl<K, V> Skiplist<K, V>
         let mut i = 1;
         for list in self.lists.iter_mut() {
             list.to_string();
-            println!("level {}", i);
+            if self.debug {
+                println!("level {}", i);
+            }
             i += 1;
         }
 
@@ -165,7 +182,9 @@ impl<K, V> Skiplist<K, V>
         let mut i = 1;
         for list in self.lists.iter_mut() {
             list.to_string_reverse();
-            println!("level {}", i);
+            if self.debug {
+                println!("level {}", i);
+            }
             i += 1;
         }
 
@@ -181,7 +200,7 @@ pub struct LinkListNode<K, V>
         V: Display
 {
     pub key: *mut K,
-    pub value: *mut V,
+    pub value: Option<Box<V>>,
     pub next: Option<*mut LinkListNode<K, V>>,
     pub front: Option<*mut LinkListNode<K, V>>,
     pub skiplist_next: Option<*mut LinkListNode<K, V>>,
@@ -197,10 +216,7 @@ impl<K, V> Drop for LinkListNode<K, V>
 {
     fn drop(&mut self) {
         unsafe {
-            let node_v = self.value;
-            println!("node drop");
             Box::from_raw(self.key);
-            Box::from_raw(self.value);
         }
     }
 }
@@ -227,7 +243,7 @@ impl<K, V> SortedLinkList<K, V>
     }
 
     fn is_empty(&mut self) -> bool {
-        if let Some(t) = self.header {
+        if let Some(_t) = self.header {
             return false;
         }
         return true;
@@ -266,35 +282,43 @@ impl<K, V> SortedLinkList<K, V>
         (last_ptr, step)
     }
 
-    fn insert(&mut self, v: *mut LinkListNode<K, V>, start: Option<*mut LinkListNode<K, V>>)
+    fn insert(&mut self, key_ptr: *mut K, box_value: Option<Box<V>>, start: Option<*mut LinkListNode<K, V>>)
               -> Option<*mut LinkListNode<K, V>> {
-        let mut ptr = self.header;
-        let mut node = Some(v);
+        let ptr = self.header;
+
         match ptr {
             None => {
+                let v = SortedLinkList::create_node(key_ptr, box_value);
+                let node = Some(v);
                 self.header = node;
                 self.tail = self.header;
                 return node;
             }
-            Some(t) => {}
+            Some(_t) => {}
         }
 
         unsafe {
             let start_key = (*start.unwrap()).key;
-            let v_key = (*v).key;
-            let desc_direction = *v_key < *start_key;
+            if *key_ptr == *start_key {
+                // mem::replace(&mut (*start.unwrap()).value, (*v).value);
+                (*start.unwrap()).value = box_value;
+                return start;
+            }
+            let v = SortedLinkList::create_node(key_ptr, box_value);
+            let node = Some(v);
+            let desc_direction = *key_ptr < *start_key;
             if desc_direction {
-                let mut next = (*start.unwrap()).next;
+                let next = (*start.unwrap()).next;
                 (*start.unwrap()).next = node;
                 (*node.unwrap()).front = start;
-                if let Some(t) = next {
+                if let Some(_t) = next {
                     (*next.unwrap()).front = node;
                     (*node.unwrap()).next = next;
                 } else {
                     self.tail = node;
                 }
             } else {
-                let mut front = (*start.unwrap()).front;
+                let front = (*start.unwrap()).front;
                 (*start.unwrap()).front = node;
                 (*node.unwrap()).next = start;
                 if let Some(t) = front {
@@ -304,15 +328,16 @@ impl<K, V> SortedLinkList<K, V>
                     self.header = node;
                 }
             }
+            return node;
         }
-        node
+        None
     }
 
     fn remove_node(&mut self, node: Option<*mut LinkListNode<K, V>>) {
         if let Some(t) = node {
             unsafe {
-                let mut front = (*t).front;
-                let mut next = (*t).next;
+                let front = (*t).front;
+                let next = (*t).next;
                 if let Some(front_ptr) = front {
                     (*front_ptr).next = next;
                 } else {
@@ -327,18 +352,14 @@ impl<K, V> SortedLinkList<K, V>
         }
     }
 
-    fn new_value(key: K, value: V) -> (*mut K, *mut V) {
+    fn new_value(key: K) -> *mut K {
         let mut key = Box::new(key);
         let key_ptr: *mut K = key.as_mut();
         mem::forget(key);
-
-        let mut value = Box::new(value);
-        let value_ptr: *mut V = value.as_mut();
-        mem::forget(value);
-        (key_ptr, value_ptr)
+        key_ptr
     }
 
-    fn create_node(key: *mut K, value: *mut V) -> *mut LinkListNode<K, V> {
+    fn create_node(key: *mut K, value: Option<Box<V>>) -> *mut LinkListNode<K, V> {
         let mut node = Box::new(LinkListNode {
             key,
             value,
@@ -359,8 +380,7 @@ impl<K, V> SortedLinkList<K, V>
         let mut ptr = self.header;
         while let Some(t) = ptr {
             unsafe {
-                let t_v = (*t).value;
-                print!("{} ", *t_v);
+                print!("{} ", *(*t).key);
                 ptr = (*t).next;
             }
         }
@@ -376,7 +396,7 @@ impl<K, V> SortedLinkList<K, V>
         let mut ptr = self.tail;
         while let Some(t) = ptr {
             unsafe {
-                print!("{} ", *(*t).value);
+                print!("{} ", *(*t).key);
                 ptr = (*t).front;
             }
         }
@@ -388,6 +408,7 @@ impl<K, V> SortedLinkList<K, V>
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::collections::HashMap;
 
 
     #[derive(PartialOrd, PartialEq)]
@@ -419,55 +440,49 @@ mod test {
 
     #[test]
     fn test_skiplist() {
-        let mut list = Skiplist::new(10);
+        let mut list = Skiplist::new(10, true);
 
-        for i in 0..50000 {
+        for i in 0..500 {
             list.set(i, Order::new(i, format!("order {}", i)));
         }
 
         if let Some(t) = list.find(15) {
-            unsafe {
-                println!("{}", *(*t).value);
-            }
+            println!("old {}", t.as_ref().name);
         }
+
+        list.set(15, Order::new(666, format!("new order 666")));
+
+        if let Some(t) = list.find(15) {
+            println!("old {}", t.as_ref().name);
+        }
+
 
         println!("\r\n\r\ndelete 25");
-        let v = list.remove(25);
-        if let Some(t) = v {
-            unsafe {
-                let bv = t.as_ref();
-                println!("{}", *bv.value)
-            }
-        }
-
+        list.remove(25);
         list.to_string();
-        list.to_string_reverse();
     }
 
 
     fn main() {
-        let mut list = Skiplist::new(10);
+        let mut list = Skiplist::new(10, true);
 
-        for i in 0..50000 {
+        for i in 0..500 {
             list.set(i, Order::new(i, format!("order {}", i)));
         }
 
         if let Some(t) = list.find(15) {
-            unsafe {
-                println!("{}", *(*t).value);
-            }
+            println!("old {}", t.as_ref().name);
         }
+
+        list.set(15, Order::new(666, format!("new order 666")));
+
+        if let Some(t) = list.find(15) {
+            println!("old {}", t.as_ref().name);
+        }
+
 
         println!("\r\n\r\ndelete 25");
-        let v = list.remove(25);
-        if let Some(t) = v {
-            unsafe {
-                let bv = t.as_ref();
-                println!("{}", *bv.value)
-            }
-        }
-
+        list.remove(25);
         list.to_string();
-        list.to_string_reverse();
     }
 }
