@@ -34,29 +34,26 @@ impl Drop for Order {
 }
 
 fn main() {
-    let mut list = Skiplist::new(10);
+    let mut list = Skiplist::new(10, true);
 
-    for i in 0..50000 {
+    for i in 0..500 {
         list.set(i, Order::new(i, format!("order {}", i)));
     }
 
     if let Some(t) = list.find(15) {
-        unsafe {
-            println!("{}", *(*t).value);
-        }
+        println!("old {}", t.as_ref().name);
     }
+
+    list.set(15, Order::new(666, format!("new order 666")));
+
+    if let Some(t) = list.find(15) {
+        println!("old {}", t.as_ref().name);
+    }
+
 
     println!("\r\n\r\ndelete 25");
-    let v = list.remove(25);
-    if let Some(t) = v {
-        unsafe {
-            let bv = t.as_ref();
-            println!("{}", *bv.value)
-        }
-    }
-
+    list.remove(25);
     list.to_string();
-    list.to_string_reverse();
 }
 ```
 
