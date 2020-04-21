@@ -4,8 +4,25 @@
 Skip list is a kind of ordered map and can store any value inside. See skip list wikipedia page to learn more about this data structure.
 
 #### How To Use
-```rust
 
+```rust
+fn main() {
+    let mut list = Skiplist::new(10, false);
+    list.set(10, "helloworld");
+    if let Some(t) = list.find(&10) {
+        println!("{}", t.as_ref());
+    }
+    list.remove(&10);
+    if let Some(t) = list.find(&10) {
+        println!("{}", t.as_ref());
+    } else {
+        println!("not found");
+    }
+}
+```
+
+
+```rust
 #[derive(PartialOrd, PartialEq)]
 pub struct Order {
     id: i32,
@@ -33,26 +50,22 @@ impl Drop for Order {
     }
 }
 
-fn main() {
-    let mut list = Skiplist::new(10, true);
 
+fn main() {
+    let mut list = Skiplist::new(10, false);
     for i in 0..500 {
         list.set(i, Order::new(i, format!("order {}", i)));
     }
 
-    if let Some(t) = list.find(15) {
-        println!("old {}", t.as_ref().name);
+    if let Some(t) = list.find(&15) {
+        println!("value is {}", t.as_ref().name);
     }
-
     list.set(15, Order::new(666, format!("new order 666")));
-
-    if let Some(t) = list.find(15) {
-        println!("old {}", t.as_ref().name);
+    if let Some(t) = list.find(&15) {
+        println!("new value {}", t.as_ref().name);
     }
-
-
     println!("\r\n\r\ndelete 25");
-    list.remove(25);
+    list.remove(&30);
     list.to_string();
 }
 ```

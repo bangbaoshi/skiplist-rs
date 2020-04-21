@@ -32,6 +32,11 @@ impl<K, V> Skiplist<K, V>
     }
 
     pub fn set(&mut self, key: K, value: V) {
+        if let Some(mut t) = self.find(&key) {
+            *t.as_mut() = value;
+            return;
+        }
+
         let mut path: Vec<Option<*mut LinkListNode<K, V>>> = vec![];
         let len = self.lists.len() - 1;
         let mut start: Option<*mut LinkListNode<K, V>> = None;
@@ -60,7 +65,8 @@ impl<K, V> Skiplist<K, V>
         let key_ptr = SortedLinkList::<K, V>::new_value(key);
         let len = self.lists.len();
         let mut front_node: Option<*mut LinkListNode<K, V>> = None;
-        let mut box_value =  Some(Box::new(value));;
+        let mut box_value = Some(Box::new(value));
+        ;
 
         for i in 0..len {
             let idx = i;
@@ -84,7 +90,7 @@ impl<K, V> Skiplist<K, V>
     }
 
 
-    pub fn find(&mut self, key: K) -> Option<&Box<V>> {
+    pub fn find(&mut self, key: &K) -> Option<&mut Box<V>> {
         let len = self.lists.len() - 1;
         let mut start: Option<*mut LinkListNode<K, V>> = None;
         let mut desc_direction = true;
@@ -95,16 +101,16 @@ impl<K, V> Skiplist<K, V>
             if list.is_empty() {
                 continue;
             }
-            let (res, find_step) = list.find(&key, start, desc_direction);
+            let (res, find_step) = list.find(key, start, desc_direction);
             step += find_step;
             if let Some(t) = res {
                 unsafe {
                     let res_key = (*t).key;
-                    if *res_key == key {
+                    if *res_key == *key {
                         result = res;
                         start = (*t).skiplist_next;
                     } else {
-                        desc_direction = *res_key > key;
+                        desc_direction = *res_key > *key;
                         start = (*t).skiplist_next;
                     }
                 }
@@ -115,7 +121,7 @@ impl<K, V> Skiplist<K, V>
         }
         if let Some(t) = result {
             unsafe {
-                if let Some(t) = &(*t).value {
+                if let Some(t) = &mut (*t).value {
                     return Some(t);
                 }
             }
@@ -124,7 +130,7 @@ impl<K, V> Skiplist<K, V>
     }
 
 
-    pub fn remove(&mut self, key: K) {
+    pub fn remove(&mut self, key: &K) {
         let len = self.lists.len() - 1;
         let mut start: Option<*mut LinkListNode<K, V>> = None;
         let mut desc_direction = true;
@@ -135,16 +141,16 @@ impl<K, V> Skiplist<K, V>
             if list.is_empty() {
                 continue;
             }
-            let (res, find_step) = list.find(&key, start, desc_direction);
+            let (res, find_step) = list.find(key, start, desc_direction);
             step += find_step;
             if let Some(t) = res {
                 unsafe {
                     let res_key = (*t).key;
-                    if *res_key == key {
+                    if *res_key == *key {
                         result = res;
                         list.remove_node(res);
                     }
-                    desc_direction = *res_key > key;
+                    desc_direction = *res_key > *key;
                     start = (*t).skiplist_next;
                 }
             }
@@ -438,44 +444,35 @@ mod test {
 
     #[test]
     fn test_skiplist() {
-        let mut list = Skiplist::new(10, true);
+        let mut list = Skiplist::new(10, false);
         for i in 0..500 {
             list.set(i, Order::new(i, format!("order {}", i)));
         }
 
-        if let Some(t) = list.find(15) {
-            println!("old {}", t.as_ref().name);
+        if let Some(t) = list.find(&15) {
+            println!("value is {}", t.as_ref().name);
         }
         list.set(15, Order::new(666, format!("new order 666")));
-        if let Some(t) = list.find(15) {
-            println!("old {}", t.as_ref().name);
+        if let Some(t) = list.find(&15) {
+            println!("new value {}", t.as_ref().name);
         }
         println!("\r\n\r\ndelete 25");
-        list.remove(15);
+        list.remove(&30);
         list.to_string();
     }
 
-
-    fn main() {
-        let mut list = Skiplist::new(10, true);
-
-        for i in 0..500 {
-            list.set(i, Order::new(i, format!("order {}", i)));
+    #[test]
+    fn test_sample() {
+        let mut list = Skiplist::new(10, false);
+        list.set(10, "helloworld");
+        if let Some(t) = list.find(&10) {
+            println!("{}", t.as_ref());
         }
-
-        if let Some(t) = list.find(15) {
-            println!("old {}", t.as_ref().name);
+        list.remove(&10);
+        if let Some(t) = list.find(&10) {
+            println!("{}", t.as_ref());
+        } else {
+            println!("not found");
         }
-
-        list.set(15, Order::new(666, format!("new order 666")));
-
-        if let Some(t) = list.find(15) {
-            println!("old {}", t.as_ref().name);
-        }
-
-
-        println!("\r\n\r\ndelete 25");
-        list.remove(25);
-        list.to_string();
     }
 }
