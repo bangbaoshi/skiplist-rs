@@ -4,21 +4,19 @@ use core::mem;
 use std::cmp::Ordering;
 use std::cmp::PartialEq;
 use std::collections::LinkedList;
-use std::fmt::Display;
 use std::ops::FnMut;
 use std::ptr::NonNull;
 use rand::Rng;
 use core::fmt;
 
 
-pub struct Skiplist<K, V> where K: PartialOrd + Display, V: Display {
+pub struct Skiplist<K, V> where K: PartialOrd {
     lists: Vec<SortedLinkList<K, V>>,
     debug: bool,
 }
 
 impl<K, V> Skiplist<K, V>
-    where K: PartialOrd + Display,
-          V: Display {
+    where K: PartialOrd {
     pub fn new(max_level: usize, debug: bool) -> Skiplist<K, V> {
         let mut lists = vec![];
         for _ in 0..max_level {
@@ -66,7 +64,6 @@ impl<K, V> Skiplist<K, V>
         let len = self.lists.len();
         let mut front_node: Option<*mut LinkListNode<K, V>> = None;
         let mut box_value = Some(Box::new(value));
-        ;
 
         for i in 0..len {
             let idx = i;
@@ -202,8 +199,7 @@ impl<K, V> Skiplist<K, V>
 
 pub struct LinkListNode<K, V>
     where
-        K: PartialOrd + Display,
-        V: Display
+        K: PartialOrd
 {
     pub key: *mut K,
     pub value: Option<Box<V>>,
@@ -213,12 +209,11 @@ pub struct LinkListNode<K, V>
     pub skiplist_front: Option<*mut LinkListNode<K, V>>,
 }
 
-impl<K, V> LinkListNode<K, V> where K: PartialOrd + Display, V: Display {}
+impl<K, V> LinkListNode<K, V> where K: PartialOrd {}
 
 impl<K, V> Drop for LinkListNode<K, V>
     where
-        K: PartialOrd + Display,
-        V: Display
+        K: PartialOrd
 {
     fn drop(&mut self) {
         unsafe {
@@ -229,8 +224,7 @@ impl<K, V> Drop for LinkListNode<K, V>
 
 struct SortedLinkList<K, V>
     where
-        K: PartialOrd + Display,
-        V: Display
+        K: PartialOrd
 {
     header: Option<*mut LinkListNode<K, V>>,
     tail: Option<*mut LinkListNode<K, V>>,
@@ -238,8 +232,7 @@ struct SortedLinkList<K, V>
 
 impl<K, V> SortedLinkList<K, V>
     where
-        K: PartialOrd + Display,
-        V: Display
+        K: PartialOrd
 {
     fn new() -> Self {
         SortedLinkList {
@@ -384,7 +377,6 @@ impl<K, V> SortedLinkList<K, V>
         let mut ptr = self.header;
         while let Some(t) = ptr {
             unsafe {
-                print!("{} ", *(*t).key);
                 ptr = (*t).next;
             }
         }
@@ -400,7 +392,6 @@ impl<K, V> SortedLinkList<K, V>
         let mut ptr = self.tail;
         while let Some(t) = ptr {
             unsafe {
-                print!("{} ", *(*t).key);
                 ptr = (*t).front;
             }
         }
@@ -413,6 +404,7 @@ impl<K, V> SortedLinkList<K, V>
 mod test {
     use super::*;
     use std::collections::HashMap;
+    use std::fmt::Display;
 
 
     #[derive(PartialOrd, PartialEq)]
