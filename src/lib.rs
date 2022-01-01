@@ -24,7 +24,7 @@ impl<'a, T, V> Skiplist<T, V> where T: PartialOrd + Display + Copy {
         }
     }
 
-    pub fn insert(&mut self, score: T, data: V) {
+    pub fn set(&mut self, score: T, data: V) {
         let mut paths = self.find_path(&score);
         let path = paths.pop().unwrap();
         let mut node = self.towers[0].insert_with_position(score, Some(data), path);
@@ -46,7 +46,7 @@ impl<'a, T, V> Skiplist<T, V> where T: PartialOrd + Display + Copy {
 
     /// 找到最适合插入新节点的位置，当然这个位置自然是最低层
     /// 首先将查找路径保存下来，然后基于查找路径插入新节点
-    pub fn find_path(&self, score: &T) -> Vec<Option<InsertPosition<T, V>>> {
+    fn find_path(&self, score: &T) -> Vec<Option<InsertPosition<T, V>>> {
         let mut level: i32 = self.towers.len() as i32 - 1;
         let mut find_position: Option<NonNull<Node<T, V>>> = None;
         let mut path = vec![];
@@ -74,7 +74,7 @@ impl<'a, T, V> Skiplist<T, V> where T: PartialOrd + Display + Copy {
         return path;
     }
 
-    pub fn peek(&self, score: &T) -> Option<&V> {
+    fn get(&self, score: &T) -> Option<&V> {
         let mut level: i32 = self.towers.len() as i32 - 1;
         let mut find_position: Option<NonNull<Node<T, V>>> = None;
         loop {
@@ -461,10 +461,27 @@ mod tests {
     use std::cmp::Ordering;
     use std::fmt;
     use super::*;
+    use rand::prelude::*;
+
 
     #[test]
-    fn test_skiplist() {
-        use rand::prelude::*;
+    fn test_main() {
+        let mut list = Skiplist::new();
+        list.set(10, "helloworld".to_string());
+        if let Some(t) = list.get(&10) {
+            println!("{}", t);
+        }
+        list.remove(&10);
+        if let Some(t) = list.get(&10) {
+            println!("{}", t);
+        } else {
+            println!("not found");
+        }
+    }
+
+
+    #[test]
+    fn test_iterator() {
         let mut rng = rand::thread_rng();
         let y: f64 = rng.gen();
         let mut nums: Vec<u32> = (1..200).collect();
@@ -472,34 +489,21 @@ mod tests {
 
         let mut skiplist = Skiplist::new();
         for i in nums {
-            skiplist.insert(i, Order::new(i));
+            println!("index is {}", i);
+            skiplist.set(i, format!("Helloworld_{}", i));
         }
-        skiplist.insert(9999, Order::new(9999));
-        println!("tower level {}, node size:{}", 6, skiplist.towers[1].len);
+
+        for v in &mut skiplist {
+            println!("{}", v.as_str());
+        }
+
+        skiplist.set(9999, "Helloworld_9999".to_string());
+
+        for v in &mut skiplist {
+            println!("{}", v.as_str());
+        }
+
     }
 
-    #[derive(Copy, Clone)]
-    struct Order {
-        id: u32,
-    }
 
-    impl Order {
-        pub fn new(id: u32) -> Self {
-            Order {
-                id,
-            }
-        }
-    }
-
-    impl PartialEq<Self> for Order {
-        fn eq(&self, other: &Self) -> bool {
-            self.id == other.id
-        }
-    }
-
-    impl PartialOrd for Order {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            self.id.partial_cmp(&other.id)
-        }
-    }
 }

@@ -7,14 +7,14 @@ Skip list is a kind of ordered map and can store any value inside. See skip list
 
 ```rust
 fn main() {
-    let mut list = Skiplist::new(10, false);
-    list.set(10, "helloworld");
-    if let Some(t) = list.find(&10) {
-        println!("{}", t.as_ref());
+    let mut list = Skiplist::new();
+    list.set(10, "helloworld".to_string());
+    if let Some(t) = list.get(&10) {
+        println!("{}", t);
     }
     list.remove(&10);
-    if let Some(t) = list.find(&10) {
-        println!("{}", t.as_ref());
+    if let Some(t) = list.get(&10) {
+        println!("{}", t);
     } else {
         println!("not found");
     }
@@ -23,50 +23,29 @@ fn main() {
 
 
 ```rust
-#[derive(PartialOrd, PartialEq)]
-pub struct Order {
-    id: i32,
-    name: String,
-}
+#[test]
+fn test_iterator() {
+    let mut rng = rand::thread_rng();
+    let y: f64 = rng.gen();
+    let mut nums: Vec<u32> = (1..200).collect();
+    nums.shuffle(&mut rng);
 
-impl Order {
-    pub fn new(id: i32, name: String) -> Order {
-        Order {
-            id,
-            name,
-        }
-    }
-}
-
-impl Display for Order {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {})", self.id, self.name)
-    }
-}
-
-impl Drop for Order {
-    fn drop(&mut self) {
-        println!("order destory, id:{}, name:{}", self.id, self.name);
-    }
-}
-
-
-fn main() {
-    let mut list = Skiplist::new(10, false);
-    for i in 0..500 {
-        list.set(i, Order::new(i, format!("order {}", i)));
+    let mut skiplist = Skiplist::new();
+    for i in nums {
+        println!("index is {}", i);
+        skiplist.set(i, format!("Helloworld_{}", i));
     }
 
-    if let Some(t) = list.find(&15) {
-        println!("value is {}", t.as_ref().name);
+    for v in &mut skiplist {
+        println!("{}", v.as_str());
     }
-    list.set(15, Order::new(666, format!("new order 666")));
-    if let Some(t) = list.find(&15) {
-        println!("new value {}", t.as_ref().name);
+
+    skiplist.set(9999, "Helloworld_9999".to_string());
+
+    for v in &mut skiplist {
+        println!("{}", v.as_str());
     }
-    println!("\r\n\r\ndelete 25");
-    list.remove(&30);
-    list.to_string();
+
 }
 ```
 
