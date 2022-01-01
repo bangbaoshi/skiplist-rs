@@ -1,8 +1,8 @@
 [package]
 name = "skiplist-rs"
-version = "0.1.4"
+version = "0.1.5"
 authors = ["bangbaoshi"]
-edition = "2018"
+edition = "2021"
 keywords = ["collection", "skiplist", "sorted"]
 
 
@@ -17,6 +17,5 @@ license = "MIT"
 description = "Skip list is a kind of ordered map and can store any value inside. See skip list wikipedia page to learn more about this data structure."
 readme = "README.md"
 
-
 [dependencies]
-rand = "0.7.3"
+rand = "0.8.4"

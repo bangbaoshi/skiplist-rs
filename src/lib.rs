@@ -1,470 +1,505 @@
-extern crate rand;
-
-use core::mem;
-use std::cmp::Ordering;
-use std::cmp::PartialEq;
-use std::collections::LinkedList;
-use std::ops::FnMut;
+use std::fmt::Display;
 use std::ptr::NonNull;
-use rand::Rng;
-use core::fmt;
 
 
-pub struct Skiplist<K, V> where K: PartialOrd {
-    lists: Vec<SortedLinkList<K, V>>,
-    debug: bool,
+pub struct Skiplist<T, V> where T: PartialOrd + Display + Copy {
+    pub towers: Vec<List<T, V>>,
+    pub next: Option<NonNull<Node<T, V>>>,
+    iterator_complete: bool,
+    is_tracing:bool,
 }
 
-impl<K, V> Skiplist<K, V>
-    where K: PartialOrd {
-    pub fn new(max_level: usize, debug: bool) -> Skiplist<K, V> {
-        let mut lists = vec![];
-        for _ in 0..max_level {
-            let list = SortedLinkList::new();
-            lists.push(list);
+
+impl<'a, T, V> Skiplist<T, V> where T: PartialOrd + Display + Copy {
+    pub fn new() -> Self {
+        let mut tower = vec![];
+        for i in 0..10 {
+            tower.push(List::new());
         }
         Skiplist {
-            lists,
-            debug,
+            towers: tower,
+            next: None,
+            iterator_complete: true,
+            is_tracing: false,
         }
     }
 
-    pub fn set(&mut self, key: K, value: V) {
-        if let Some(mut t) = self.find(&key) {
-            *t.as_mut() = value;
-            return;
-        }
-
-        let mut path: Vec<Option<*mut LinkListNode<K, V>>> = vec![];
-        let len = self.lists.len() - 1;
-        let mut start: Option<*mut LinkListNode<K, V>> = None;
-        let mut desc_direction = true;
-        for i in 0..self.lists.len() {
-            let list = &mut self.lists[len - i];
-            if list.is_empty() {
-                path.push(None);
-                continue;
-            }
-            let (res, _) = list.find(&key, start, desc_direction);
-            if let Some(t) = res {
-                path.push(res);
-                unsafe {
-                    let res_key = (*t).key;
-                    desc_direction = *res_key > key;
-                    start = (*t).skiplist_next;
-                }
-            } else {
-                path.push(None);
-            }
-        }
-
-        path.reverse();
-        let mut rng = rand::thread_rng();
-        let key_ptr = SortedLinkList::<K, V>::new_value(key);
-        let len = self.lists.len();
-        let mut front_node: Option<*mut LinkListNode<K, V>> = None;
-        let mut box_value = Some(Box::new(value));
-
-        for i in 0..len {
-            let idx = i;
-            let list = &mut self.lists[idx];
-            start = path[idx];
-            let node = list.insert(key_ptr, box_value, start);
-            box_value = None;
-            if let Some(t) = front_node {
-                unsafe {
-                    (*t).skiplist_front = node;
-                    (*node.unwrap()).skiplist_next = front_node;
-                }
-            }
-            let uplevel = rng.gen_range(0, 100);
-
-            if uplevel % 2 > 0 {
+    pub fn insert(&mut self, score: T, data: V) {
+        let mut paths = self.find_path(&score);
+        let path = paths.pop().unwrap();
+        let mut node = self.towers[0].insert_with_position(score, Some(data), path);
+        let mut level = 1;
+        paths.reverse();
+        for path in paths {
+            if rand::random() {
                 break;
             }
-            front_node = node;
+            let mut above_node = self.towers[level as usize].insert_with_position(score, None, path);
+            unsafe {
+                above_node.as_mut().tower_below = Some(node);
+                node.as_mut().tower_above = Some(above_node);
+                node = above_node;
+            }
+            level += 1;
         }
     }
 
-
-    pub fn find(&mut self, key: &K) -> Option<&mut Box<V>> {
-        let len = self.lists.len() - 1;
-        let mut start: Option<*mut LinkListNode<K, V>> = None;
-        let mut desc_direction = true;
-        let mut step = 0;
-        let mut result: Option<*mut LinkListNode<K, V>> = None;
-        for i in 0..self.lists.len() {
-            let list = &mut self.lists[len - i];
-            if list.is_empty() {
-                continue;
-            }
-            let (res, find_step) = list.find(key, start, desc_direction);
-            step += find_step;
-            if let Some(t) = res {
-                unsafe {
-                    let res_key = (*t).key;
-                    if *res_key == *key {
-                        result = res;
-                        start = (*t).skiplist_next;
-                    } else {
-                        desc_direction = *res_key > *key;
-                        start = (*t).skiplist_next;
+    /// 找到最适合插入新节点的位置，当然这个位置自然是最低层
+    /// 首先将查找路径保存下来，然后基于查找路径插入新节点
+    pub fn find_path(&self, score: &T) -> Vec<Option<InsertPosition<T, V>>> {
+        let mut level: i32 = self.towers.len() as i32 - 1;
+        let mut find_position: Option<NonNull<Node<T, V>>> = None;
+        let mut path = vec![];
+        loop {
+            let list = &self.towers[level as usize];
+            ///在查找的过程中也可以执行插入操作
+            let mut fit_position = list.find(score, find_position, self.is_tracing);
+            if let Some(n) = &mut fit_position {
+                n.level = level as usize;
+                if let Some(n) = n.position {
+                    unsafe {
+                        if self.is_tracing {
+                            println!("tower level:{}, find step {}", level, n.as_ref().score);
+                        }
+                        find_position = n.as_ref().tower_below;
                     }
                 }
             }
+            path.push(fit_position);
+            level -= 1;
+            if level < 0 {
+                break;
+            }
         }
-        if self.debug {
-            println!("step cost {}", step);
+        return path;
+    }
+
+    pub fn peek(&self, score: &T) -> Option<&V> {
+        let mut level: i32 = self.towers.len() as i32 - 1;
+        let mut find_position: Option<NonNull<Node<T, V>>> = None;
+        loop {
+            let list = &self.towers[level as usize];
+            ///在查找的过程中也可以执行插入操作
+            let fit_position = list.find(score, find_position, self.is_tracing);
+            if let Some(n) = &fit_position {
+                if let Some(n) = n.position {
+                    unsafe {
+                        if self.is_tracing {
+                            println!("tower level:{}, find step {}", level, n.as_ref().score);
+                        }
+                        if let Some(t) = n.as_ref().tower_below {
+                            find_position = n.as_ref().tower_below;
+                        } else {
+                            find_position = Some(n);
+                        }
+                    }
+                }
+            }
+            level -= 1;
+            if level < 0 {
+                break;
+            }
         }
-        if let Some(t) = result {
+        if let Some(mut t) = find_position {
             unsafe {
-                if let Some(t) = &mut (*t).value {
-                    return Some(t);
+                if t.as_ref().score == *score {
+                    return t.as_mut().get();
                 }
             }
         }
         None
     }
 
+    pub fn remove(&mut self, score: &T) {
+        let mut paths = self.find_path(score);
 
-    pub fn remove(&mut self, key: &K) {
-        let len = self.lists.len() - 1;
-        let mut start: Option<*mut LinkListNode<K, V>> = None;
-        let mut desc_direction = true;
-        let mut step = 0;
-        let mut result: Option<*mut LinkListNode<K, V>> = None;
-        for i in 0..self.lists.len() {
-            let list = &mut self.lists[len - i];
-            if list.is_empty() {
-                continue;
-            }
-            let (res, find_step) = list.find(key, start, desc_direction);
-            step += find_step;
-            if let Some(t) = res {
-                unsafe {
-                    let res_key = (*t).key;
-                    if *res_key == *key {
-                        result = res;
-                        list.remove_node(res);
+        for v in paths {
+            if let Some(insert_position) = v {
+                if let Some(t) = insert_position.position {
+                    unsafe {
+                        if t.as_ref().score == *score {
+                            self.towers[insert_position.level].remove(insert_position);
+                        }
                     }
-                    desc_direction = *res_key > *key;
-                    start = (*t).skiplist_next;
                 }
             }
         }
-        if let Some(t) = result {
-            unsafe {
-                (*t).next = None;
-                (*t).front = None;
-                (*t).skiplist_front = None;
-                (*t).skiplist_next = None;
-                Box::from_raw(t);
-            }
-        }
-        if self.debug {
-            println!("step cost {}", step);
-        }
-    }
-
-
-    pub fn to_string(&mut self) {
-        let mut i = 1;
-        for list in self.lists.iter_mut() {
-            list.to_string();
-            if self.debug {
-                println!("level {}", i);
-            }
-            i += 1;
-        }
-
-        println!("---------");
-        println!("scan finish");
-    }
-
-    pub fn to_string_reverse(&mut self) {
-        let mut i = 1;
-        for list in self.lists.iter_mut() {
-            list.to_string_reverse();
-            if self.debug {
-                println!("level {}", i);
-            }
-            i += 1;
-        }
-
-        println!("---------");
-        println!("scan finish");
     }
 }
 
 
-pub struct LinkListNode<K, V>
-    where
-        K: PartialOrd
-{
-    pub key: *mut K,
-    pub value: Option<Box<V>>,
-    pub next: Option<*mut LinkListNode<K, V>>,
-    pub front: Option<*mut LinkListNode<K, V>>,
-    pub skiplist_next: Option<*mut LinkListNode<K, V>>,
-    pub skiplist_front: Option<*mut LinkListNode<K, V>>,
-}
+impl<'a, T, V> Iterator for &'a mut Skiplist<T, V> where T: PartialOrd + Display + Copy {
+    type Item = &'a V;
 
-impl<K, V> LinkListNode<K, V> where K: PartialOrd {}
 
-impl<K, V> Drop for LinkListNode<K, V>
-    where
-        K: PartialOrd
-{
-    fn drop(&mut self) {
-        unsafe {
-            Box::from_raw(self.key);
-        }
-    }
-}
-
-struct SortedLinkList<K, V>
-    where
-        K: PartialOrd
-{
-    header: Option<*mut LinkListNode<K, V>>,
-    tail: Option<*mut LinkListNode<K, V>>,
-}
-
-impl<K, V> SortedLinkList<K, V>
-    where
-        K: PartialOrd
-{
-    fn new() -> Self {
-        SortedLinkList {
-            header: None,
-            tail: None,
-        }
-    }
-
-    fn is_empty(&mut self) -> bool {
-        if let Some(_t) = self.header {
-            return false;
-        }
-        return true;
-    }
-
-    fn find(&mut self, key: &K, start: Option<*mut LinkListNode<K, V>>, desc_direction: bool)
-            -> (Option<*mut LinkListNode<K, V>>, i32) {
-        let mut ptr = start;
-        if ptr == None {
-            ptr = self.header;
-        }
-        let mut last_ptr = ptr;
-        let mut step = 1;
-        while let Some(t) = ptr {
-            step += 1;
-            unsafe {
-                let t_key = (*t).key;
-                if *t_key == *key {
-                    return (ptr, step);
-                }
-                if desc_direction & &(*t_key < *key) {
-                    break;
-                }
-                if !desc_direction & &(*t_key > *key) {
-                    break;
-                }
-                last_ptr = ptr;
-                if desc_direction {
-                    ptr = (*t).next;
-                } else {
-                    ptr = (*t).front;
+    fn next(&mut self) -> Option<&'a V> {
+        if self.iterator_complete {
+            if let Some(next) = self.towers[0].header {
+                unsafe {
+                    let v = next.as_ref().data.as_ref();
+                    self.next = next.as_ref().next;
+                    self.iterator_complete = false;
+                    return v;
                 }
             }
-        }
-        (last_ptr, step)
-    }
-
-    fn insert(&mut self, key_ptr: *mut K, box_value: Option<Box<V>>, start: Option<*mut LinkListNode<K, V>>)
-              -> Option<*mut LinkListNode<K, V>> {
-        let ptr = self.header;
-
-        match ptr {
-            None => {
-                let v = SortedLinkList::create_node(key_ptr, box_value);
-                let node = Some(v);
-                self.header = node;
-                self.tail = self.header;
-                return node;
-            }
-            Some(_t) => {}
-        }
-
-        unsafe {
-            let start_key = (*start.unwrap()).key;
-            if *key_ptr == *start_key {
-                // mem::replace(&mut (*start.unwrap()).value, (*v).value);
-                (*start.unwrap()).value = box_value;
-                return start;
-            }
-            let v = SortedLinkList::create_node(key_ptr, box_value);
-            let node = Some(v);
-            let desc_direction = *key_ptr < *start_key;
-            if desc_direction {
-                let next = (*start.unwrap()).next;
-                (*start.unwrap()).next = node;
-                (*node.unwrap()).front = start;
-                if let Some(_t) = next {
-                    (*next.unwrap()).front = node;
-                    (*node.unwrap()).next = next;
-                } else {
-                    self.tail = node;
+        } else {
+            if let Some(next) = self.next {
+                unsafe {
+                    let v = next.as_ref().data.as_ref();
+                    self.next = next.as_ref().next;
+                    return v;
                 }
             } else {
-                let front = (*start.unwrap()).front;
-                (*start.unwrap()).front = node;
-                (*node.unwrap()).next = start;
-                if let Some(t) = front {
-                    (*t).next = node;
-                    (*node.unwrap()).front = front;
-                } else {
-                    self.header = node;
-                }
+                self.iterator_complete = true;
             }
-            return node;
+        }
+
+        None
+    }
+}
+
+
+pub struct List<T, V> where T: Display {
+    pub header: Option<NonNull<Node<T, V>>>,
+    pub tailer: Option<NonNull<Node<T, V>>>,
+    /// 记录链表中的节点数量,可以查看跳跃表每层的节点数量是否分布均匀
+    pub len: usize,
+}
+
+
+impl<T, V> List<T, V> where T: PartialOrd + Display + Copy {
+    pub fn new() -> Self {
+        List {
+            header: None,
+            tailer: None,
+            len: 0,
         }
     }
 
-    fn remove_node(&mut self, node: Option<*mut LinkListNode<K, V>>) {
-        if let Some(t) = node {
+    pub fn remove(&mut self, positon: InsertPosition<T, V>) {
+        if let Some(n) = positon.position {
             unsafe {
-                let front = (*t).front;
-                let next = (*t).next;
-                if let Some(front_ptr) = front {
-                    (*front_ptr).next = next;
-                } else {
+                let mut front = n.as_ref().prev;
+                let mut next = n.as_ref().next;
+                if let None = front {
                     self.header = next;
                 }
-                if let Some(next_ptr) = next {
-                    (*next_ptr).front = front;
+                if let None = next {
+                    self.tailer = front;
+                }
+
+                if let Some(mut f) = front {
+                    if let Some(mut n) = next {
+                        f.as_mut().next = next;
+                        n.as_mut().prev = front;
+                    } else {
+                        f.as_mut().next = None;
+                    }
+                }
+
+                if let Some(mut n) = next {
+                    if let Some(mut f) = front {
+                        f.as_mut().next = next;
+                        n.as_mut().prev = front;
+                    } else {
+                        n.as_mut().prev = None;
+                    }
+                }
+                let b = Box::from_raw(n.as_ptr());
+            }
+        }
+    }
+
+    pub fn insert_with_position(&mut self, score: T, data: Option<V>, insert_position: Option<InsertPosition<T, V>>) -> NonNull<Node<T, V>> {
+        self.len += 1;
+        let node_box = Box::new(Node::new(score, data));
+        let mut node: NonNull<Node<T, V>> = Box::leak(node_box).into();
+        if let Some(mut position) = insert_position {
+            unsafe {
+                let mut brother = position.position.unwrap();
+                if position.is_right {
+                    node.as_mut().next = brother.as_ref().next;
+                    node.as_mut().prev = Some(brother);
+                    brother.as_mut().next = Some(node);
+                    if let Some(mut brother_next) = node.as_ref().next {
+                        brother_next.as_mut().prev = Some(node);
+                    } else {
+                        self.tailer = Some(node);
+                    }
                 } else {
-                    self.tail = front;
+                    node.as_mut().prev = brother.as_ref().prev;
+                    node.as_mut().next = Some(brother);
+                    brother.as_mut().prev = Some(node);
+                    if let Some(mut brother_prev) = node.as_ref().prev {
+                        brother_prev.as_mut().next = Some(node);
+                    } else {
+                        self.header = Some(node);
+                    }
+                }
+            }
+        } else {
+            self.header = Some(node);
+            self.tailer = Some(node);
+        }
+        return node;
+    }
+
+    pub fn insert(&mut self, score: T, data: Option<V>) {
+        let node_box = Box::new(Node::new(score, data));
+        let mut node: NonNull<Node<T, V>> = Box::leak(node_box).into();
+        if let None = self.header {
+            self.header = Some(node);
+            self.tailer = Some(node);
+            return;
+        }
+
+        unsafe {
+            if node.as_ref().score > self.header.unwrap().as_ref().score {
+                self.header.unwrap().as_mut().prev = Some(node);
+                node.as_mut().next = self.header;
+                self.header = Some(node);
+                return;
+            }
+        }
+
+        let mut prev_ptr = self.header.unwrap();
+        loop {
+            unsafe {
+                let mut cur_ptr = prev_ptr.as_ref().next;
+                if let None = cur_ptr {
+                    node.as_mut().prev = Some(prev_ptr);
+                    prev_ptr.as_mut().next = Some(node);
+                    self.tailer = Some(node);
+                    break;
+                }
+                if node.as_ref().score > cur_ptr.unwrap().as_ref().score {
+                    cur_ptr.unwrap().as_mut().prev = Some(node);
+                    node.as_mut().next = cur_ptr;
+                    node.as_mut().prev = Some(prev_ptr);
+                    prev_ptr.as_mut().next = Some(node);
+                    break;
+                }
+                prev_ptr = cur_ptr.unwrap();
+            }
+        }
+    }
+
+    ///
+    /// 寻找该层最适合插入的位置
+    /// 除非链表是空的，否则不会返回空值
+    ///
+    pub fn find(&self, score: &T, find_position: Option<NonNull<Node<T, V>>>, is_tracing: bool) -> Option<InsertPosition<T, V>> {
+        let mut cur_ptr = self.header;
+        /// 假定不断向右靠近最佳位置
+        let mut direct_right = true;
+        if let Some(t) = find_position {
+            cur_ptr = find_position;
+        }
+        if let Some(t) = cur_ptr {
+            unsafe {
+                /// 根据两者的值来判断，位移方向应该是向左，还是向右
+                if t.as_ref().score < *score {
+                    direct_right = false;
                 }
             }
         }
+
+        loop {
+            unsafe {
+                if let Some(n) = cur_ptr {
+                    if n.as_ref().score == *score {
+                        return Some(InsertPosition::new(cur_ptr, true));
+                    }
+
+                    let mut next_position: Option<NonNull<Node<T, V>>> = None;
+                    match direct_right {
+                        /// 因score本身较小，往右遍历找到比自己小的节点，在该节点左侧插入
+                        true => {
+                            if *score > n.as_ref().score {
+                                return Some(InsertPosition::new(cur_ptr, false));
+                            }
+                            if is_tracing {
+                                println!("find step {}", n.as_ref().score);
+                            }
+                            next_position = n.as_ref().next;
+                        }
+                        /// 因score本身较大，往左遍历找到比自己大的节点，在节点右侧插入
+                        false => {
+                            if *score < n.as_ref().score {
+                                return Some(InsertPosition::new(cur_ptr, true));
+                            }
+                            if is_tracing {
+                                println!("find step {}", n.as_ref().score);
+                            }
+                            next_position = n.as_ref().prev;
+                        }
+                    }
+
+                    if let None = next_position {
+                        return match direct_right {
+                            true => {
+                                Some(InsertPosition::new(cur_ptr, true))
+                            }
+                            false => {
+                                Some(InsertPosition::new(cur_ptr, false))
+                            }
+                        };
+                    }
+                    cur_ptr = next_position;
+                } else {
+                    break;
+                }
+            }
+        }
+        None
     }
 
-    fn new_value(key: K) -> *mut K {
-        let mut key = Box::new(key);
-        let key_ptr: *mut K = key.as_mut();
-        mem::forget(key);
-        key_ptr
+    pub fn pop(&mut self) -> Option<T> {
+        if let Some(n) = self.header {
+            unsafe {
+                let next = self.header.unwrap().as_ref().next;
+                let b = Box::from_raw(n.as_ptr());
+                self.header = next;
+                if let Some(mut n) = self.header {
+                    n.as_mut().prev = None;
+                } else {
+                    self.tailer = None;
+                }
+                return Some(b.score);
+            }
+        }
+        None
     }
 
-    fn create_node(key: *mut K, value: Option<Box<V>>) -> *mut LinkListNode<K, V> {
-        let mut node = Box::new(LinkListNode {
-            key,
-            value,
+    pub fn to_debug(&self) {
+        let mut cur_ptr = self.header;
+        loop {
+            if let Some(node) = cur_ptr {
+                unsafe {
+                    println!("{}", node.as_ref().score);
+                    cur_ptr = node.as_ref().next;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    pub fn to_debug_reverse(&self) {
+        let mut cur_ptr = self.tailer;
+        loop {
+            if let Some(node) = cur_ptr {
+                unsafe {
+                    println!("{}", node.as_ref().score);
+                    cur_ptr = node.as_ref().prev;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+}
+
+pub struct InsertPosition<T, V> where T: PartialOrd + Display + Copy {
+    position: Option<NonNull<Node<T, V>>>,
+    is_right: bool,
+    level: usize,
+}
+
+impl<T, V> InsertPosition<T, V> where T: PartialOrd + Display + Copy {
+    pub fn new(position: Option<NonNull<Node<T, V>>>, is_right: bool) -> Self {
+        InsertPosition {
+            position,
+            is_right,
+            level: 0,
+        }
+    }
+}
+
+
+pub struct Node<T, V> where T: Display {
+    score: T,
+    data: Option<V>,
+    prev: Option<NonNull<Node<T, V>>>,
+    next: Option<NonNull<Node<T, V>>>,
+    tower_above: Option<NonNull<Node<T, V>>>,
+    tower_below: Option<NonNull<Node<T, V>>>,
+}
+
+impl<T, V> Node<T, V> where T: PartialOrd + Display + Copy {
+    pub fn new(score: T, data: Option<V>) -> Self {
+        Node {
+            score,
+            data,
+            prev: None,
             next: None,
-            front: None,
-            skiplist_next: None,
-            skiplist_front: None,
-        });
-        let ptr: *mut LinkListNode<K, V> = node.as_mut();
-        mem::forget(node);
-        ptr
+            tower_above: None,
+            tower_below: None,
+        }
     }
 
-    fn to_string(&mut self) {
-        if self.header == None {
-            return;
+    pub fn get(&mut self) -> Option<&V> {
+        if let Some(t) = &self.data {
+            return Some(t);
         }
-        let mut ptr = self.header;
-        while let Some(t) = ptr {
-            unsafe {
-                ptr = (*t).next;
-            }
-        }
-        println!();
-        println!("-------------------------------");
+        None
     }
+}
 
-
-    fn to_string_reverse(&mut self) {
-        if self.header == None {
-            return;
-        }
-        let mut ptr = self.tail;
-        while let Some(t) = ptr {
-            unsafe {
-                ptr = (*t).front;
-            }
-        }
-        println!();
-        println!("-------------------------------");
+impl<T, V> Drop for Node<T, V> where T: Display {
+    fn drop(&mut self) {
+        println!("node drop, score is {}", self.score);
     }
+}
+
+pub struct Segment {
+    pub id: u32,
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
+    use std::cmp::Ordering;
+    use std::fmt;
     use super::*;
-    use std::collections::HashMap;
-    use std::fmt::Display;
 
+    #[test]
+    fn test_skiplist() {
+        use rand::prelude::*;
+        let mut rng = rand::thread_rng();
+        let y: f64 = rng.gen();
+        let mut nums: Vec<u32> = (1..200).collect();
+        nums.shuffle(&mut rng);
 
-    #[derive(PartialOrd, PartialEq)]
-    pub struct Order {
-        id: i32,
-        name: String,
+        let mut skiplist = Skiplist::new();
+        for i in nums {
+            skiplist.insert(i, Order::new(i));
+        }
+        skiplist.insert(9999, Order::new(9999));
+        println!("tower level {}, node size:{}", 6, skiplist.towers[1].len);
+    }
+
+    #[derive(Copy, Clone)]
+    struct Order {
+        id: u32,
     }
 
     impl Order {
-        pub fn new(id: i32, name: String) -> Order {
+        pub fn new(id: u32) -> Self {
             Order {
                 id,
-                name,
             }
         }
     }
 
-    impl Display for Order {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "({}, {})", self.id, self.name)
+    impl PartialEq<Self> for Order {
+        fn eq(&self, other: &Self) -> bool {
+            self.id == other.id
         }
     }
 
-    impl Drop for Order {
-        fn drop(&mut self) {
-            println!("order destory, id:{}, name:{}", self.id, self.name);
-        }
-    }
-
-    #[test]
-    fn test_skiplist() {
-        let mut list = Skiplist::new(10, false);
-        for i in 0..500 {
-            list.set(i, Order::new(i, format!("order {}", i)));
-        }
-
-        if let Some(t) = list.find(&15) {
-            println!("value is {}", t.as_ref().name);
-        }
-        list.set(15, Order::new(666, format!("new order 666")));
-        if let Some(t) = list.find(&15) {
-            println!("new value {}", t.as_ref().name);
-        }
-        println!("\r\n\r\ndelete 25");
-        list.remove(&30);
-        list.to_string();
-    }
-
-    #[test]
-    fn test_sample() {
-        let mut list = Skiplist::new(10, false);
-        list.set(10, "helloworld");
-        if let Some(t) = list.find(&10) {
-            println!("{}", t.as_ref());
-        }
-        list.remove(&10);
-        if let Some(t) = list.find(&10) {
-            println!("{}", t.as_ref());
-        } else {
-            println!("not found");
+    impl PartialOrd for Order {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            self.id.partial_cmp(&other.id)
         }
     }
 }
